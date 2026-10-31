@@ -16,8 +16,10 @@ public final class AnisetteUrlValidatorUtil {
         try {
             var url = new URL(urlInput).toURI();
 
-            // no path allowed -> this must be BASE URL
-            return url.getPath() == null || url.getPath().isEmpty();
+            // Standard servers use a base URL; the explicit path opts into
+            // the experimental, identity-consistent macOS CoreADI bridge.
+            var path = url.getPath();
+            return path == null || path.isEmpty() || "/v3/get_headers".equals(path);
 
         } catch (Exception e) {
             return false;
