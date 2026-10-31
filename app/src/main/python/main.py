@@ -31,6 +31,7 @@ from findmy.reports.twofactor import (
 )
 
 import identity as app_identity
+import mac_adi_bridge
 
 
 class TwoFactorMethods(Enum):
@@ -303,10 +304,15 @@ def loginSync(email: str, password: str, anisetteServerUrl: str,
         # before there was a choice keeps the Mac its ADI was provisioned with, and a fresh one
         # is an iPhone. Passed even when local Anisette turns out to be unusable, because a
         # sign-in relayed through a server must still claim the same machine.
+        if mac_adi_bridge.is_bridge_url(anisetteServerUrl):
+            # The headers are provisioned for the remote Mac, not this phone.
+            provider_identity, account_ids = mac_adi_bridge.load_profile(anisetteServerUrl)
+            localAnisette = None
+        else:
+            provider_identity = app_identity.identityForNewSession(localAnisette)
+            account_ids = app_identity.deviceIdsForNewSession(localAnisette)
         anisette = _anisetteProvider(
-            anisetteServerUrl,
-            localAnisette,
-            **app_identity.identityForNewSession(localAnisette),
+            anisetteServerUrl, localAnisette, **provider_identity,
         )
         # And the two ids the same install already used when it provisioned ADI, so this is one
         # device rather than two that happen to share a serial. Empty when Java cannot say, in
@@ -316,7 +322,7 @@ def loginSync(email: str, password: str, anisetteServerUrl: str,
         acc = AppleAccount(
             anisette,
             timeout=LOGIN_TIMEOUT_SECONDS,
-            **app_identity.deviceIdsForNewSession(localAnisette),
+            **account_ids,
         )
 
         state = acc.login(email, password)
@@ -771,6 +777,14 @@ def _preferLocalAnisette(acc: AppleAccount, localAnisette: Any) -> None:
     worst case is the behaviour the app has always had.
     """
     if localAnisette is None:
+        return
+
+    # Do not replace a restored Mac bridge account's identity with phone ADI.
+    inner = getattr(acc, "_asyncacc", None)
+    previous = getattr(inner, "_anisette", None) if inner is not None else None
+    if previous is not None and mac_adi_bridge.is_bridge_url(
+        getattr(previous, "_server_url", None)
+    ):
         return
 
     try:
